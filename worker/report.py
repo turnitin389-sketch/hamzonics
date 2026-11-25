@@ -12,9 +12,11 @@ Sections (same numbers as the online report, from api.services):
 
 from __future__ import annotations
 
+import base64
 import hashlib
 from datetime import datetime
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from typing import Any
 from urllib.parse import urlparse
 from zoneinfo import ZoneInfo
@@ -27,21 +29,21 @@ from api.models import DocumentText, ReportRow, Submission, as_utc, utcnow
 from api.services import ai_view, similarity_view
 from engine.report import build_pdf_report, html_to_pdf, pdf_page_count, qr_data_uri, render_footer, render_report
 
-# Source badge & pill colours (Turnitin's exact 4-colour cycle): (badge_bg, pill_bg)
+# Source badge and pill colours, used consistently in the list and margins.
 SOURCE_PALETTE = [
-    ("#cb1375", "#fedce7"),  # Magenta / Light Pink
-    ("#215dc6", "#d6e5fb"),  # Blue / Light Blue
-    ("#007445", "#c1ecdf"),  # Green / Light Mint
-    ("#7432e7", "#ecdffe"),  # Purple / Light Lavender
+    ("#cb1476", "#fedce7"),  # Magenta / Light Pink
+    ("#225ec6", "#d6e5fb"),  # Blue / Light Blue
+    ("#007546", "#c1ecdf"),  # Green / Light Mint
+    ("#7533e7", "#ecdffe"),  # Purple / Light Lavender
 ]
 SOURCE_COLORS = [c[0] for c in SOURCE_PALETTE]
 TYPE_LABEL = {"corpus": "Publication", "web": "Internet", "submission": "Submitted works"}
 TYPE_PILL = {"corpus": "#ecdffe", "web": "#fedce7", "submission": "#c1ecdf"}
 # key, label, highlight colour, icon background colour, description
 GROUPS = [
-    ("not_cited_or_quoted", "Not Cited or Quoted", "#f59a9a", "#f86270",
+    ("not_cited_or_quoted", "Not Cited or Quoted", "#f59a9a", "#f86371",
      "Matches with neither in-text citation nor quotation marks"),
-    ("missing_quotations", "Missing Quotations", "#fbbd7c", "#f68e49",
+    ("missing_quotations", "Missing Quotations", "#fbbd7c", "#f68e4a",
      "Matches that are still very similar to source material"),
     ("missing_citation", "Missing Citation", "#f7e08a", "#f4e4aa",
      "Matches that have quotation marks, but no in-text citation"),
@@ -50,7 +52,7 @@ GROUPS = [
 ]
 GROUP_BY_KEY = {g[0]: g for g in GROUPS}
 BIB_COLOR = ("#d9dee6", "#8a94a6")
-AI_COLORS = {"ai": ("#8fe3f0", "#00a3bf"), "possible": ("#d9c8f7", "#7b52c7")}
+AI_COLORS = {"ai": ("#cceef5", "#00849b"), "possible": ("#e8dff8", "#7b52c7")}
 FLAG_TEXT = {
     "lookalike_characters": ("Look-alike characters", "characters",
                              "Letters from other alphabets that look like English letters; replaced before checking."),
@@ -63,55 +65,20 @@ FLAG_TEXT = {
     "image_only_pages": ("Image-only pages", "pages", "Pages without a text layer; read with OCR."),
 }
 MAX_FLAG_EXAMPLES = 8
-# The site's one logo file (same file as the website's header, footer and favicon).
-# docker-compose.yml mounts frontend/public/logo.png here in the report containers.
-LOGO_FILE = Path(__file__).resolve().parent.parent / "frontend" / "public" / "logo.png"
-
-
-# Page header logo (base64 SVG containing the logo, or the fallback mark if the file is missing).
-def _get_logo_uri() -> str:
-    import base64
-    from PIL import Image
-
-    for p in [
-        Path(__file__).resolve().parent.parent / "engine" / "report" / "templates" / "logo.png",
-        Path(__file__).resolve().parent.parent / "engine" / "report" / "templates" / "logo.jpg",
-        Path(__file__).resolve().parent.parent / "frontend" / "public" / "logo.png",
-        Path(__file__).resolve().parent.parent / "frontend" / "public" / "logo.jpg",
-        Path("/app/engine/report/templates/logo.png"),
-        Path("/app/frontend/public/logo.png"),
-        Path(r"C:\Users\123\OneDrive\Desktop\logo.jpg"),
-    ]:
-        if p.is_file():
-            try:
-                with Image.open(p) as img:
-                    w, h = img.size
-            except Exception:
-                w, h = 641, 205
-            target_h = 20
-            target_w = max(1, int(target_h * (w / h)))
-            mime = "image/png" if p.suffix.lower() == ".png" else "image/jpeg"
-            b64_img = f"data:{mime};base64," + base64.b64encode(p.read_bytes()).decode("ascii")
-            svg = (
-                f'<svg xmlns="http://www.w3.org/2000/svg" width="{target_w}" height="{target_h}" viewBox="0 0 {w} {h}">'
-                f'<image href="{b64_img}" width="{w}" height="{h}"/>'
-                f'</svg>'
-            )
-            return "data:image/svg+xml;base64," + base64.b64encode(svg.encode("utf-8")).decode("ascii")
-
-    # Clean Turnitin wordmark fallback if no file is present
-    fallback_svg = (
-        b"<svg xmlns='http://www.w3.org/2000/svg' width='75' height='24' viewBox='0 0 100 32'>"
-        b"<text x='4' y='22' font-family='Arial,Helvetica,sans-serif' font-size='18' font-weight='bold' fill='#013b46'>turnitin</text></svg>"
-    )
-    return "data:image/svg+xml;base64," + base64.b64encode(fallback_svg).decode("ascii")
+_REPORT_PACKAGE = Path(__file__).resolve().parent.parent / "engine" / "report"
+_REPORT_LAYOUT_REVISION = "hamzonics-v2"
+_WORDMARK = (
+    b"<svg xmlns='http://www.w3.org/2000/svg' width='150' height='32' viewBox='0 0 150 32'>"
+    b"<rect x='1' y='4' width='24' height='24' rx='6' fill='#1e556e'/>"
+    b"<path d='M8 10v12m10-12v12M8 16h10' fill='none' stroke='white' stroke-width='2'/>"
+    b"<text x='34' y='22' font-family='Arial,Helvetica,sans-serif' font-size='18' "
+    b"font-weight='bold' fill='#17394b'>Hamzonics</text></svg>"
+)
+LOGO_URI = "data:image/svg+xml;base64," + base64.b64encode(_WORDMARK).decode("ascii")
 
 
 def get_logo_uri() -> str:
-    return _get_logo_uri()
-
-
-LOGO_URI = _get_logo_uri()
+    return LOGO_URI
 
 
 def _fmt(dt: datetime | None, tz: ZoneInfo) -> str:
@@ -142,9 +109,7 @@ def verify_url(submission_id: str) -> str:
 
 
 def display_id(submission_id: str) -> str:
-    h = int(hashlib.sha256(submission_id.encode("utf-8")).hexdigest()[:8], 16)
-    num = 1000000000 + (h % 9000000000)
-    return f"trn:oid:::1:{num}"
+    return submission_id
 
 
 def sources_searched_text() -> str:
@@ -168,17 +133,34 @@ def source_display(src_type: str, title: str, url: str | None) -> str:
     return title
 
 
+def _source_link(url: str | None) -> str | None:
+    if not url or any(ord(char) < 32 or ord(char) == 127 for char in url):
+        return None
+    url = url.strip()
+    try:
+        parsed = urlparse(url)
+        if parsed.scheme in {"http", "https"} and parsed.hostname and not any(
+            char.isspace() for char in parsed.netloc
+        ):
+            return url
+    except ValueError:
+        return None
+    return None
+
+
 def _highlight_segments(text: str, spans: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Split text into plain and highlighted pieces. spans: start, end, bg, line, badge(s)."""
+    """Split the original text in order, with earlier spans owning any shared characters."""
     out: list[dict[str, Any]] = []
     pos = 0
     for sp in sorted(spans, key=lambda s: s["start"]):
-        if sp["start"] < pos:
+        start = max(pos, sp["start"])
+        end = min(len(text), sp["end"])
+        if start >= end:
             continue
-        if sp["start"] > pos:
-            out.append({"text": text[pos : sp["start"]]})
-        out.append({**sp, "text": text[sp["start"] : sp["end"]]})
-        pos = sp["end"]
+        if start > pos:
+            out.append({"text": text[pos:start]})
+        out.append({**sp, "start": start, "end": end, "text": text[start:end]})
+        pos = end
     if pos < len(text):
         out.append({"text": text[pos:]})
     return out
@@ -203,8 +185,10 @@ def build_context(db: Session, sub: Submission, part: str = "all") -> dict[str, 
         badge_col, pill_col = SOURCE_PALETTE[i % len(SOURCE_PALETTE)]
         color_of[s.source_key] = badge_col
         number_of[s.source_key] = i + 1
-        sources.append({"number": i + 1, "color": badge_col, "title": source_display(s.type, s.title, s.url),
-                        "full_title": s.title, "url": s.url, "type": s.type, "type_label": TYPE_LABEL.get(s.type, s.type),
+        link_url = _source_link(s.url)
+        sources.append({"number": i + 1, "color": badge_col, "title": source_display(s.type, s.title, link_url),
+                        "full_title": s.title, "url": s.url, "link_url": link_url,
+                        "type": s.type, "type_label": TYPE_LABEL.get(s.type, s.type),
                         "pill": pill_col, "words": s.words, "percent": s.percent,
                         "percent_label": pct_label(s.percent)})
 
@@ -217,7 +201,8 @@ def build_context(db: Session, sub: Submission, part: str = "all") -> dict[str, 
         bg, line = (g[2], g[3]) if g else BIB_COLOR
         badge = None if run.source_key == last_key else {"number": number_of[run.source_key],
                                                           "color": color_of[run.source_key], "icon": run.group}
-        spans.append({"start": run.start, "end": run.end, "bg": bg, "line": line, "badge": badge})
+        spans.append({"start": run.start, "end": run.end, "bg": bg, "line": line,
+                      "group": run.group, "badge": badge})
         last_key = run.source_key
     sim_segments = _highlight_segments(text, spans)
 
@@ -249,7 +234,7 @@ def build_context(db: Session, sub: Submission, part: str = "all") -> dict[str, 
     ]
 
     ai_spans = [{"start": s.start, "end": s.end, "bg": AI_COLORS[s.level][0], "line": AI_COLORS[s.level][1],
-                 "badge": None, "level": s.level} for s in ai.segments]
+                 "badge": None, "level": s.level} for s in ai.segments if s.level in AI_COLORS]
     ai_segments = _highlight_segments(text, ai_spans)
     ai_ctx = {
         "available": ai.available,
@@ -274,23 +259,16 @@ def build_context(db: Session, sub: Submission, part: str = "all") -> dict[str, 
                                     "detail": loc.get("detail")} for loc in f.locations[:MAX_FLAG_EXAMPLES]],
                       "more": max(0, len(f.locations) - MAX_FLAG_EXAMPLES)})
 
-    h_sub = int(hashlib.sha256(sub.id.encode()).hexdigest()[:8], 16)
-    stem = Path(sub.original_filename).stem.replace("_", " ").strip()
-    author = stem.title() if stem else "Author"
-    doc_num = str(1000 + (h_sub % 9000))
-    class_name = f"CLASS_{str(10000 + (h_sub % 90000))}"
-    institution = "Universitas Slamet Riyadi"
-
     url = verify_url(sub.id)
     return {
         "part": part if part in REPORT_PARTS else "all",
-        "app_name": settings.app_name,
+        "app_name": "Hamzonics",
         "submission_id": sub.id,
         "display_id": display_id(sub.id),
-        "author": author,
-        "doc_num": doc_num,
-        "class_name": class_name,
-        "institution": institution,
+        "author": "",
+        "doc_num": "",
+        "class_name": "",
+        "institution": "",
         "filename": sub.original_filename,
         "file_size": size_label(sub.file_size),
         "submitted": _fmt(sub.created_at, tz),
@@ -304,7 +282,7 @@ def build_context(db: Session, sub: Submission, part: str = "all") -> dict[str, 
         "similarity": sim,
         "similarity_label": pct_label(sim.percent),
         "web_warning": sim.web_search_message,
-        "logo_uri": _get_logo_uri(),
+        "logo_uri": get_logo_uri(),
         "sources": sources,
         "groups": groups,
         "filtered": filtered,
@@ -315,6 +293,7 @@ def build_context(db: Session, sub: Submission, part: str = "all") -> dict[str, 
         "ai_segments": ai_segments,
         "clean_text": text,
         "source_pdf_path": sub.file_path if sub.file_type == "pdf" else None,
+        "source_page_offsets": (doc.offsets or {}).get("pages", []),
         "verify_url": url,
         "verify_base": settings.public_base_url.rstrip("/"),
         "qr_data_uri": qr_data_uri(url),
@@ -322,13 +301,60 @@ def build_context(db: Session, sub: Submission, part: str = "all") -> dict[str, 
     }
 
 
+def pdf_artifact_marker_path(path: Path) -> Path:
+    return path.with_suffix(path.suffix + ".layout")
+
+
+def _layout_marker(mtime_ns: int, size: int) -> bytes:
+    return f"{_REPORT_LAYOUT_REVISION}\n{mtime_ns}\n{size}\n".encode("ascii")
+
+
+def pdf_artifact_is_current(path: Path) -> bool:
+    """Check the layout revision, artifact identity and installed asset timestamps."""
+    try:
+        pdf_info = path.stat()
+        marker = pdf_artifact_marker_path(path).read_bytes()
+    except FileNotFoundError:
+        return False
+    if marker != _layout_marker(pdf_info.st_mtime_ns, pdf_info.st_size):
+        return False
+
+    layout_files = [
+        Path(__file__),
+        *_REPORT_PACKAGE.glob("*.py"),
+        *_REPORT_PACKAGE.rglob("*.html"),
+        *_REPORT_PACKAGE.rglob("*.ttf"),
+        *_REPORT_PACKAGE.rglob("*.otf"),
+        *_REPORT_PACKAGE.rglob("*.woff*"),
+    ]
+    for source in layout_files:
+        try:
+            if source.stat().st_mtime_ns > pdf_info.st_mtime_ns:
+                return False
+        except FileNotFoundError:
+            continue
+    return True
+
+
+def _write_report(path: Path, pdf: bytes) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with TemporaryDirectory(dir=path.parent, prefix=f".{path.name}.") as folder:
+        tmp = Path(folder) / path.name
+        marker_path = pdf_artifact_marker_path(path)
+        tmp_marker = Path(folder) / marker_path.name
+        tmp.write_bytes(pdf)
+        info = tmp.stat()
+        tmp_marker.write_bytes(_layout_marker(info.st_mtime_ns, info.st_size))
+        tmp.replace(path)
+        tmp_marker.replace(marker_path)
+
+
 def generate_report(db: Session, sub: Submission) -> ReportRow:
     ctx = build_context(db, sub)
     pdf = build_pdf_report(ctx)
     folder = Path(get_settings().report_dir)
-    folder.mkdir(parents=True, exist_ok=True)
     path = folder / f"{sub.id}.pdf"
-    path.write_bytes(pdf)
+    _write_report(path, pdf)
     row = db.scalar(select(ReportRow).where(ReportRow.submission_id == sub.id))
     if row is None:
         row = ReportRow(submission_id=sub.id, pdf_path=str(path), sha256="", pages=0)
@@ -346,11 +372,8 @@ def part_report_path(submission_id: str, part: str) -> Path:
 def generate_part_report(db: Session, sub: Submission, part: str) -> Path:
     """Similarity-only or AI-only PDF, built on first download and kept next to the full report."""
     path = part_report_path(sub.id, part)
-    if not path.exists():
+    if not pdf_artifact_is_current(path):
         ctx = build_context(db, sub, part=part)
         pdf = build_pdf_report(ctx)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = path.with_suffix(".tmp")
-        tmp.write_bytes(pdf)
-        tmp.replace(path)
+        _write_report(path, pdf)
     return path
