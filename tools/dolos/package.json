@@ -1,0 +1,9 @@
+{
+  "name": "hamzonics-dolos-runner",
+  "private": true,
+  "type": "module",
+  "description": "Runs Dolos (MIT) on a set of source files and prints JSON for the Python worker.",
+  "dependencies": {
+    "@dodona/dolos-lib": "3.6.0"
+  }
+}

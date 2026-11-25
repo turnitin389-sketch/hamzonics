@@ -1,0 +1,41 @@
+# Runtime dependencies for api/, engine/ and worker/. Exact pins; the full
+# transitive lock lives in requirements.lock (generated with `pip freeze`).
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+python-multipart==0.0.20
+pydantic==2.10.4
+pydantic-settings==2.7.0
+email-validator==2.2.0
+SQLAlchemy==2.0.36
+alembic==1.14.0
+psycopg[binary]==3.2.3
+argon2-cffi==23.1.0
+PyJWT==2.10.1
+celery==5.4.0
+redis==6.4.0
+
+# Text extraction
+pdfplumber==0.11.4
+python-docx==1.1.2
+lxml==6.1.3
+striprtf==0.0.28
+pytesseract==0.3.13
+Pillow==11.0.0
+
+# Similarity (Phase 3). PyTorch CPU build: install with
+#   --extra-index-url https://download.pytorch.org/whl/cpu
+torch==2.15.0+cpu
+sentence-transformers==6.3.0
+transformers==5.23.0
+numpy==2.5.5
+spacy==3.8.18
+pgvector==0.5.1
+trafilatura==2.3.1
+httpx==0.28.1
+
+# PDF reports (Phase 4): PyMuPDF composer + headless Chromium fallback
+Jinja2==3.1.6
+qrcode[pil]==8.0
+pypdfium2==5.15.2
+pymupdf==1.25.2
+playwright==1.65.2

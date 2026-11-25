@@ -1,0 +1,6 @@
+# The app runs on Linux (Docker on the VPS): keep LF line endings everywhere.
+* text=auto eol=lf
+*.png binary
+*.jpg binary
+*.pdf binary
+*.docx binary

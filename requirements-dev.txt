@@ -1,0 +1,7 @@
+-r requirements.txt
+pytest==8.3.4
+pytest-cov==6.0.0
+# Used only by tests to build PDF fixtures and by the optional PDF backend
+# (AGPL-3.0, off in production by default; see THIRD_PARTY.md).
+PyMuPDF==1.25.1
+locust==2.47.0

@@ -1,0 +1,32 @@
+# SearXNG for Hamzonics: internal web search for the similarity worker only.
+use_default_settings: true
+
+general:
+  instance_name: hamzonics-search
+
+server:
+  # The secret comes from SEARXNG_SECRET in .env.
+  limiter: false          # only our worker calls it, from inside the Docker network
+  image_proxy: false
+  public_instance: false
+
+search:
+  safe_search: 0
+  formats:
+    - html
+    - json                # Hamzonics reads JSON results
+
+engines:
+  - name: google
+    disabled: false
+  # Bing answers exact-phrase queries from bots with unrelated results (tested 2026-11-22).
+  - name: bing
+    disabled: true
+  - name: duckduckgo
+    disabled: false
+  - name: brave
+    disabled: false
+  - name: google scholar
+    disabled: false
+  - name: semantic scholar
+    disabled: false

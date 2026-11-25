@@ -1,0 +1,16 @@
+# Keep the build context small and never bake secrets, local data or Windows binaries into images.
+.git
+.venv
+**/__pycache__
+**/*.pyc
+.pytest_cache
+.coverage
+data
+.env
+.env.*
+!.env.example
+frontend
+tests
+docs
+*.md
+!corpus/**/*.md

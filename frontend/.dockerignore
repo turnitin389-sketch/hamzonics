@@ -1,0 +1,7 @@
+# node_modules and .next from Windows must not reach the Linux image (npm ci builds them fresh).
+node_modules
+.next
+tsconfig.tsbuildinfo
+next-env.d.ts
+*.log
+.env*
