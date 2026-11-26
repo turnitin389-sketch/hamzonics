@@ -29,7 +29,8 @@ def scorers(names: list[str]):  # type: ignore[no-untyped-def]
     if "desklib" in names:
         from engine.ai.desklib import get_desklib
 
-        out["desklib"] = get_desklib(s.ai2_model, s.ai2_model_revision, Path(s.model_dir), s.torch_threads)
+        out["desklib"] = get_desklib(s.ai2_model, s.ai2_model_revision, Path(s.model_dir), s.torch_threads,
+                                     s.ai2_quantize)
     return out
 
 

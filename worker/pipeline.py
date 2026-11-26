@@ -145,7 +145,8 @@ def sources_fingerprint(settings: Settings) -> str:
         parts.append(f"confirm={settings.ai_confirm_model}@{settings.ai_confirm_model_revision[:7]}:"
                      f"{settings.ai_confirm_threshold}:{settings.ai_threshold_unconfirmed}")
     if settings.ai2_enabled:
-        parts.append(f"ai2={settings.ai2_model}@{settings.ai2_model_revision[:7]}:{settings.ai2_rule}")
+        parts.append(f"ai2={settings.ai2_model}@{settings.ai2_model_revision[:7]}:{settings.ai2_rule}"
+                     + (":int8" if settings.ai2_quantize else ""))
     return ",".join(parts)
 
 
@@ -287,7 +288,7 @@ def _compute_ai(db, sub: Submission, clean_text: str, settings: Settings) -> dic
             from engine.ai.desklib import get_desklib
 
             second = get_desklib(settings.ai2_model, settings.ai2_model_revision, Path(settings.model_dir),
-                                 settings.torch_threads)
+                                 settings.torch_threads, settings.ai2_quantize)
             scorer = CombinedScorer(scorer, second, settings.ai2_rule)  # type: ignore[assignment]
         except Exception:
             log.exception("second AI model could not be loaded; using the first only")

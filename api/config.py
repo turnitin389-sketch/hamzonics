@@ -120,6 +120,8 @@ class Settings(BaseSettings):
     ai2_model: str = "desklib/ai-text-detector-v1.01"
     ai2_model_revision: str = "5fdea974cd4287c61674951ec78803aa274e2fb7"
     ai2_rule: str = "max"  # how the two scores are combined: max | mean | min
+    # int8 (dynamic quantization) for the second detector: ~1 GB less RAM, for small servers.
+    ai2_quantize: bool = False
     # Confirming detector (needs PyTorch): a window is AI only if BOTH models say so.
     # Measured 2026-11-23 (scripts/eval_classifiers.py): the primary model alone wrongly flagged
     # 11/159 human texts (book summaries, news, finance answers) and 6/130 in a separate hold-out

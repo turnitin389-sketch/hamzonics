@@ -33,6 +33,12 @@ ARG AI_CONFIRM_MODEL=SuperAnnotate/ai-detector
 ARG AI_CONFIRM_MODEL_REVISION=74b2b8580915c202607c09f64f8170eaa87a6a14
 RUN python -c "from huggingface_hub import hf_hub_download as d; [d('${AI_CONFIRM_MODEL}', f, revision='${AI_CONFIRM_MODEL_REVISION}', cache_dir='/opt/models') for f in ('model.safetensors','tokenizer.json','tokenizer_config.json','special_tokens_map.json','vocab.json','merges.txt','config.json')]; d('FacebookAI/roberta-large', 'config.json', revision='722cf37b1afa9454edce342e7895e588b6ff1d59', cache_dir='/opt/models')" \
  && chmod -R a+rX /opt/models
+# Second AI detector (DeskLib DeBERTa-v3-large, ~1.7 GB; PyTorch). Used only when AI2_ENABLED=true.
+ARG AI2_MODEL=desklib/ai-text-detector-v1.01
+ARG AI2_MODEL_REVISION=5fdea974cd4287c61674951ec78803aa274e2fb7
+COPY engine/ai/desklib.py /tmp/desklib.py
+RUN python -c "import importlib.util as u, pathlib; s=u.spec_from_file_location('dl','/tmp/desklib.py'); m=u.module_from_spec(s); s.loader.exec_module(m); m.download('${AI2_MODEL}', '${AI2_MODEL_REVISION}', pathlib.Path('/opt/models'))" \
+ && rm /tmp/desklib.py && chmod -R a+rX /opt/models
 ENV HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1
 
 # Headless Chromium for PDF reports, plus Noto fonts (Latin + Arabic script for Urdu).

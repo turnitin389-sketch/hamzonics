@@ -66,5 +66,10 @@ def _preload_ai_models(**_: object) -> None:
 
             get_superannotate(settings.ai_confirm_model, settings.ai_confirm_model_revision,
                               Path(settings.model_dir), settings.torch_threads)
+        if settings.ai2_enabled:
+            from engine.ai.desklib import get_desklib
+
+            get_desklib(settings.ai2_model, settings.ai2_model_revision, Path(settings.model_dir),
+                        settings.torch_threads, settings.ai2_quantize)
     except Exception:  # the check itself reports / falls back if a model cannot load
         logging.getLogger(__name__).exception("AI model preload failed; models load on first use")

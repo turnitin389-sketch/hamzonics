@@ -15,31 +15,46 @@ FILES = ("config.json", "model.safetensors", "tokenizer.json", "tokenizer_config
 MAX_TOKENS = 768
 
 _lock = threading.Lock()
-_cache: dict[tuple[str, str], "DesklibScorer"] = {}
+_cache: dict[tuple[str, str, bool], "DesklibScorer"] = {}
 
 
 class DesklibScorer:
-    def __init__(self, model_dir: Path, name: str, threads: int = 1) -> None:
+    def __init__(self, model_dir: Path, name: str, threads: int = 1, quantize: bool = False) -> None:
         import torch
         from safetensors.torch import load_file
         from transformers import AutoConfig, AutoModel, AutoTokenizer
 
         torch.set_num_threads(max(1, threads))
         self.torch = torch
-        self.name = name
+        self.name = name + (" int8" if quantize else "")
         config = AutoConfig.from_pretrained(str(model_dir))
-        self.encoder = AutoModel.from_config(config)
+        # Build the encoder without allocating weights, then adopt the loaded tensors (assign=True):
+        # peak memory is one copy of the weights (~1.7 GB) instead of two.
+        with torch.device("meta"):
+            self.encoder = AutoModel.from_config(config)
         self.head = torch.nn.Linear(config.hidden_size, 1)
         state = load_file(str(model_dir / "model.safetensors"))
         enc_state = {k[len("model."):]: state.pop(k) for k in list(state) if k.startswith("model.")}
-        missing, _ = self.encoder.load_state_dict(enc_state, strict=False)
+        missing, _ = self.encoder.load_state_dict(enc_state, strict=False, assign=True)
         del enc_state
         self.head.load_state_dict({k[len("classifier."):]: v for k, v in state.items() if k.startswith("classifier.")})
         del state
         if [m for m in missing if "position_ids" not in m]:
             raise RuntimeError(f"Desklib weights incomplete: {missing[:5]}")
+        # Buffers that are not in the checkpoint (e.g. position_ids) are still on "meta": recreate them.
+        for mod in self.encoder.modules():
+            for bname, buf in list(mod.named_buffers(recurse=False)):
+                if buf.is_meta:
+                    if bname == "position_ids":
+                        mod.register_buffer(bname, torch.arange(buf.shape[-1]).expand(buf.shape).clone(),
+                                            persistent=False)
+                    else:
+                        mod.register_buffer(bname, torch.zeros(buf.shape, dtype=buf.dtype), persistent=False)
         self.encoder.eval()
         self.head.eval()
+        if quantize:
+            # int8 dynamic quantization of the Linear layers: ~1 GB less RAM and faster on small CPUs.
+            self.encoder = torch.ao.quantization.quantize_dynamic(self.encoder, {torch.nn.Linear}, dtype=torch.qint8)
         self.tokenizer = AutoTokenizer.from_pretrained(str(model_dir))
 
     def count_tokens(self, text: str) -> int:
@@ -69,9 +84,10 @@ def download(repo: str, revision: str, cache_dir: Path) -> Path:
     return path.parent
 
 
-def get_desklib(repo: str, revision: str, cache_dir: Path, threads: int = 1) -> DesklibScorer:
-    key = (repo, revision)
+def get_desklib(repo: str, revision: str, cache_dir: Path, threads: int = 1, quantize: bool = False) -> DesklibScorer:
+    key = (repo, revision, quantize)
     with _lock:
         if key not in _cache:
-            _cache[key] = DesklibScorer(download(repo, revision, cache_dir), f"{repo}@{revision[:7]}", threads)
+            _cache[key] = DesklibScorer(download(repo, revision, cache_dir), f"{repo}@{revision[:7]}", threads,
+                                        quantize)
         return _cache[key]
