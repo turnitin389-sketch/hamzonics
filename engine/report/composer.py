@@ -1,13 +1,10 @@
-"""Pixel-exact PDF report composer using PyMuPDF (fitz).
-
-Produces US Letter (612 x 792 pt) reports matching the Turnitin reference
-geometry extracted directly from the reference PDFs (Mateen_1 AI, Mateen_2 Sim).
-Every coordinate, font, color, and spacing is pinned to reference measurements.
-"""
+"""Compose Hamzonics Similarity and AI Writing reports on US Letter pages."""
 
 from __future__ import annotations
 
 import re
+import unicodedata
+from bisect import bisect_left, bisect_right
 from pathlib import Path
 from typing import Any
 
@@ -21,14 +18,11 @@ PAGE_H = 792.0
 KAPPA = 0.5522847498
 
 # ---------------------------------------------------------------------------
-# Exact reference colors (normalized RGB floats, extracted from reference PDFs)
+# Report colors (normalized RGB floats)
 # ---------------------------------------------------------------------------
-# col=#-E6E6E7 → 0xFFE6E6E7 → RGB(230,230,231) in PDF = near-white on dark bg
-# But in our composer we're drawing on WHITE background, so colors are reversed.
-# Reference uses dark background — but actual page background IS white.
-# The color values extracted are display-space: #191918 ≈ very dark gray for text
-C_TEXT   = (25/255, 25/255, 24/255)       # #191918 — main body text
-C_MUTED  = (100/255, 100/255, 100/255)    # #646464 — secondary text (NotoSans-Regular muted)
+C_BRAND  = (23/255, 57/255, 75/255)
+C_TEXT   = (25/255, 25/255, 25/255)
+C_MUTED  = (99/255, 99/255, 99/255)
 C_WHITE  = (1.0, 1.0, 1.0)               # badge number text
 C_RULE   = (0.800781, 0.800781, 0.800781) # #CCCCCC — divider lines
 C_STATS_BG  = (0.972656, 0.972656, 0.972656)  # #F8F8F8
@@ -140,20 +134,45 @@ def _draw_rule(page: fitz.Page, x0: float, x1: float, y: float) -> None:
     sh.commit()
 
 
+def _commit_highlights(page: fitz.Page, shape: fitz.Shape) -> None:
+    if not shape.totalcont:
+        return
+    shape.commit()
+    doc = page.parent
+    # Use a dedicated blend state so translucent highlights leave dark glyphs legible.
+    state = doc.get_new_xref()
+    doc.update_object(state, "<< /Type /ExtGState /BM /Multiply >>")
+    _, reference = doc.xref_get_key(page.xref, "Resources")
+    resources = int(reference.split()[0])
+    doc.xref_set_key(resources, "ExtGState/ReportMultiply", f"{state} 0 R")
+    stream = page.get_contents()[-1]
+    doc.update_stream(stream, b"q\n/ReportMultiply gs\n" + doc.xref_stream(stream) + b"\nQ\n")
+
+
 def _wrap_text(text: str, font: fitz.Font, fontsize: float, max_width: float) -> list[str]:
     words = text.split()
     if not words:
         return [""]
     lines: list[str] = []
-    cur = words[0]
-    for w in words[1:]:
-        cand = f"{cur} {w}"
-        if font.text_length(cand, fontsize=fontsize) <= max_width:
-            cur = cand
-        else:
+    cur = ""
+    for word in words:
+        candidate = f"{cur} {word}" if cur else word
+        if font.text_length(candidate, fontsize=fontsize) <= max_width:
+            cur = candidate
+            continue
+        if cur:
             lines.append(cur)
-            cur = w
-    lines.append(cur)
+        start = 0
+        width = 0.0
+        for index, advance in enumerate(font.char_lengths(word, fontsize=fontsize)):
+            if width + advance > max_width and index > start:
+                lines.append(word[start:index])
+                start = index
+                width = 0.0
+            width += advance
+        cur = word[start:]
+    if cur:
+        lines.append(cur)
     return lines
 
 
@@ -202,12 +221,6 @@ class _Composer:
         label: str,
         display_id: str,
     ) -> None:
-        logo = self._img("turnitin_logo.png")
-        # Header logo: exactly [36, 24, 91, 40.5] from reference
-        page.insert_image(fitz.Rect(36.0, 24.0, 91.0, 40.5), stream=logo)
-        # Footer logo: exactly [36, 748, 91, 764.5] from reference
-        page.insert_image(fitz.Rect(36.0, 748.0, 91.0, 764.5), stream=logo)
-
         left_str = f"Page {page_num} of {total_pages} - {label}"
         f_reg = self.fonts["noto_reg"]
 
@@ -223,9 +236,11 @@ class _Composer:
         lbl_x = id_x - 5.0 - lbl_w
 
         for y in (34.0, 758.0):
+            self._t(page, 36.0, y, "Hamzonics", "lexend_sb", 8.0, C_BRAND)
             self._t(page, 107.0, y, left_str,       "noto_reg", 6.0, C_TEXT)
             self._t(page, lbl_x,  y, "Submission ID", "noto_reg", 6.0, C_TEXT)
             self._t(page, id_x,   y, display_id,      "noto_reg", 6.0, C_TEXT)
+        page.draw_line(fitz.Point(36, 44), fitz.Point(576, 44), color=C_BRAND, width=0.8)
 
     # -----------------------------------------------------------------------
     # Cover page — exact geometry from reference AI Page 1 / Sim Page 1
@@ -233,52 +248,40 @@ class _Composer:
     def _build_cover(self, doc: fitz.Document, ctx: dict[str, Any]) -> None:
         p = self._new_page(doc, "Cover Page")
 
-        # Author name: y=324, x=36, sz=20, LexendDeca-SemiBold
-        author_lines = _wrap_text(ctx["author"], self.fonts["lexend_sb"], 20.0, 540.0)
-        y = 324.0
-        for line in author_lines:
-            self._t(p, 36.0, y, line, "lexend_sb", 20.0, C_TEXT)
-            y += 24.0
-        dy = y - 348.0  # 0 when 1 line
+        author = ctx.get("author")
+        filename = str(ctx["filename"])
+        title = _wrap_text(author or filename, self.fonts["lexend_sb"], 20.0, 540.0)
+        subtitle = _wrap_text(filename, self.fonts["lexend_md"], 17.0, 540.0) if author else []
+        extra_title = (len(title) - 1) * 24.0 + max(0, len(subtitle) - 1) * 20.0
 
-        # Filename: y=354, x=36, sz=17, LexendDeca-Medium
-        fn_lines = _wrap_text(ctx["filename"], self.fonts["lexend_md"], 17.0, 540.0)
-        fy = 354.0 + dy
-        for line in fn_lines:
-            self._t(p, 36.0, fy, line, "lexend_md", 17.0, C_TEXT)
-            fy += 20.0
-        dy += (len(fn_lines) - 1) * 20.0
-
-        # Meta icons: from reference — y=374 doc_num, y=390 class_name, y=406 institution
-        # Icon at (36, iy, 48, iy+12); text at x=56, y=ty (sz=8, NotoSans-Regular, muted)
-        # Reference exact: y=374 "4444", y=390 "CLASS_01620", y=406 "Universitas Slamet Riyadi"
-        # Order: doc_num→374, class_name→390, institution→406
-        meta = [
-            ("cover_doc.png",   str(ctx["doc_num"]),    374.0 + dy, 374.0 + dy),
-            ("cover_class.png", str(ctx["class_name"]), 390.0 + dy, 390.0 + dy),
-            ("cover_inst.png",  str(ctx["institution"]),406.0 + dy, 406.0 + dy),
-        ]
-        for icon_name, val, iy, ty in meta:
-            p.insert_image(fitz.Rect(36.0, iy - 10.0, 48.0, iy + 2.0), stream=self._img(icon_name))
-            self._t(p, 56.0, ty, val, "noto_reg", 8.0, C_MUTED)
-
-        # Horizontal rule: y=425 + dy
-        _draw_rule(p, 36.0, 576.0, 425.0 + dy)
-
-        # "Document Details" heading: y=454, x=36, sz=10, NotoSans-SemiBold
-        self._t(p, 36.0, 454.0 + dy, "Document Details", "noto_sb", 10.0, C_TEXT)
-
-        # Detail fields — exact from reference
         details = [
-            ("Submission ID",   ctx["display_id"],  480.0 + dy, 494.0 + dy),
-            ("Submission Date", ctx["submitted"],    516.0 + dy, 530.0 + dy),
-            ("Download Date",   ctx["generated"],    552.0 + dy, 566.0 + dy),
-            ("File Name",       ctx["filename"],     588.0 + dy, 602.0 + dy),
-            ("File Size",       ctx["file_size"],    624.0 + dy, 638.0 + dy),
+            ("Submission ID", ctx["display_id"]),
+            ("Submission Date", ctx["submitted"]),
+            ("Download Date", ctx["generated"]),
+            ("File Name", filename),
+            ("File Size", ctx["file_size"]),
         ]
-        for lbl, val, ly, vy in details:
-            self._t(p, 36.0, ly, lbl,      "noto_sb", 7.0, C_MUTED)
-            self._t(p, 36.0, vy, str(val), "noto_sb", 7.0, C_TEXT)
+        detail_rows = [
+            (label, _wrap_text(str(value), self.fonts["noto_sb"], 7.0, 345.0))
+            for label, value in details
+        ]
+        extra_details = sum((len(lines) - 1) * 10.0 for _, lines in detail_rows)
+        lift = max(0.0, 638.0 + extra_title + extra_details - 718.0)
+        dy = extra_title - lift
+        for index, line in enumerate(title):
+            self._t(p, 36.0, 324.0 - lift + index * 24.0, line, "lexend_sb", 20.0, C_BRAND)
+        for index, line in enumerate(subtitle):
+            baseline = 354.0 - lift + (len(title) - 1) * 24.0 + index * 20.0
+            self._t(p, 36.0, baseline, line, "lexend_md", 17.0, C_TEXT)
+
+        _draw_rule(p, 36.0, 576.0, 425.0 + dy)
+        self._t(p, 36.0, 454.0 + dy, "Document Details", "noto_sb", 10.0, C_TEXT)
+        label_y = 480.0 + dy
+        for label, lines in detail_rows:
+            self._t(p, 36.0, label_y, label, "noto_sb", 7.0, C_MUTED)
+            for index, line in enumerate(lines):
+                self._t(p, 36.0, label_y + 14.0 + index * 10.0, line, "noto_sb", 7.0, C_TEXT)
+            label_y += 36.0 + (len(lines) - 1) * 10.0
 
         # Stats box: Rect(403, 470+dy, 492, 548+dy)
         sh = p.new_shape()
@@ -298,22 +301,21 @@ class _Composer:
     def _build_ai_overview(self, doc: fitz.Document, ctx: dict[str, Any]) -> None:
         p = self._new_page(doc, "AI Writing Overview")
         ai = ctx["ai"]
-        pct = (
-            f"{ai['percent_label']}{'*' if ai.get('low') else ''}"
-            if ai.get("available") else "0%"
-        )
-
-        # Rule at y=60
+        available = ai.get("available", False)
         _draw_rule(p, 36.0, 576.0, 60.0)
 
-        # "X% detected as AI": y=98, x=36, sz=17, LexendDeca-Medium
-        self._t(p, 36.0, 98.0, f"{pct} detected as AI", "lexend_md", 17.0, C_TEXT)
-        self._t(p, 36.0, 108.0,
-                "The percentage indicates the combined amount of likely AI-generated text as",
-                "noto_reg", 7.0, C_TEXT)
-        self._t(p, 36.0, 118.0,
-                "well as likely AI-generated text that was also likely revised by AI.",
-                "noto_reg", 7.0, C_TEXT)
+        if available:
+            pct = f"{ai['percent_label']}{'*' if ai.get('low') else ''}"
+            self._t(p, 36.0, 98.0, f"{pct} detected as AI", "lexend_md", 17.0, C_TEXT)
+            summary = (
+                "The score estimates the share of eligible text that the analyzer classified "
+                "as likely written or revised by AI."
+            )
+        else:
+            self._t(p, 36.0, 98.0, "AI Writing score unavailable", "lexend_md", 15.0, C_TEXT)
+            summary = ai.get("message") or "No AI Writing score is available for this submission."
+        for index, line in enumerate(_wrap_text(summary, self.fonts["noto_reg"], 7.0, 252.0)):
+            self._t(p, 36.0, 108.0 + index * 10.0, line, "noto_reg", 7.0, C_TEXT)
 
         # Caution box: Rect(306, 76, 579, 132) — from reference AI_OVR page
         sh = p.new_shape()
@@ -326,30 +328,31 @@ class _Composer:
                 "It is essential to understand the limitations of AI detection before making decisions",
                 "noto_reg", 6.0, C_CAUTION_TXT)
         self._t(p, 318.0, 116.0,
-                "about a student\u2019s work. We encourage you to learn more about Turnitin\u2019s AI detection",
+                "about a student\u2019s work. Review the limitations of this analyzer before using its",
                 "noto_reg", 6.0, C_CAUTION_TXT)
         self._t(p, 318.0, 124.0,
-                "capabilities before using the tool.",
+                "results.",
                 "noto_reg", 6.0, C_CAUTION_TXT)
 
         # Rule at y=148
         _draw_rule(p, 36.0, 576.0, 148.0)
 
-        # AI robot icon: Rect(36,168,48,180) — 12x12pt
-        p.insert_image(fitz.Rect(36.0, 162.0, 48.0, 180.0), stream=self._img("ai_robot.png"))
+        if available:
+            # AI robot icon: Rect(36,168,48,180) — 12x12pt
+            p.insert_image(fitz.Rect(36.0, 168.0, 48.0, 180.0), stream=self._img("ai_robot.png"))
 
-        # Segment count + label: y=174, x=52
-        cnt_str = str(ai.get("ai_segments_count", 0))
-        self._t(p, 52.0, 174.0, cnt_str, "noto_sb", 7.0, C_TEXT)
-        cnt_w = self.fonts["noto_sb"].text_length(cnt_str, fontsize=7.0)
-        ai_pct_lbl = ai["percent_label"] if ai.get("available") else "0%"
-        self._t(p, 52.0 + cnt_w + 2.0, 174.0,
-                f"AI-generated  {ai_pct_lbl}", "noto_reg", 7.0, C_TEXT)
+            # Segment count + label: y=174, x=52
+            cnt_str = str(ai.get("ai_segments_count", 0))
+            self._t(p, 52.0, 174.0, cnt_str, "noto_sb", 7.0, C_TEXT)
+            cnt_w = self.fonts["noto_sb"].text_length(cnt_str, fontsize=7.0)
+            ai_pct_lbl = ai["percent_label"]
+            self._t(p, 52.0 + cnt_w + 2.0, 174.0,
+                    f"AI-generated  {ai_pct_lbl}", "noto_reg", 7.0, C_TEXT)
 
-        # Subtitle: y=184, x=52
-        self._t(p, 52.0, 184.0,
-                "Likely generated or likely generated and revised by AI.",
-                "noto_reg", 7.0, C_MUTED)
+            # Subtitle: y=184, x=52
+            self._t(p, 52.0, 184.0,
+                    "Likely generated or likely generated and revised by AI.",
+                    "noto_reg", 7.0, C_MUTED)
 
         # Rule at y=200
         _draw_rule(p, 36.0, 576.0, 200.0)
@@ -478,7 +481,7 @@ class _Composer:
                     "No suspicious text manipulations found.", "noto_reg", 7.0, C_MUTED)
         else:
             iy = 341.5 + dy
-            for fl in flags[:4]:
+            for fl in flags:
                 self._t(p, 36.0, iy,
                         f"{fl['title']} \u2014 {fl['count']} {fl['unit']}", "noto_reg", 7.0, C_TEXT)
                 iy += 12.0
@@ -531,7 +534,7 @@ class _Composer:
             row_h = SRC_ROW_H + extra_lines * 18.0
 
             # Page break
-            if y_top + row_h > 730.0:
+            if y_top + row_h - 10.0 > 738.0:
                 p = self._new_page(doc, "Integrity Overview")
                 y_top = 75.0
 
@@ -572,15 +575,16 @@ class _Composer:
             self._t(p, SRC_PCT_X, y_top + SRC_TITLE_DY, s["percent_label"], "noto_sb", 8.0, C_TEXT)
 
             # Hyperlink annotation
-            if s.get("url") and str(s["url"]).startswith(("http://", "https://")):
+            if s.get("link_url"):
                 link_rect = fitz.Rect(
                     36.0, y_top + 16.0, 376.0,
                     y_top + SRC_TITLE_DY + extra_lines * 18.0 + 10.0
                 )
-                p.insert_link({"kind": fitz.LINK_URI, "from": link_rect, "uri": s["url"]})
+                p.insert_link({"kind": fitz.LINK_URI, "from": link_rect, "uri": s["link_url"]})
 
             # Rule: y = y_top + row_h - 10 (38pt below y_top for single-line)
-            _draw_rule(p, 36.0, 400.0, y_top + row_h - 10.0)
+            if idx < len(sources) - 1:
+                _draw_rule(p, 36.0, 400.0, y_top + row_h - 10.0)
             y_top += row_h
 
     # -----------------------------------------------------------------------
@@ -710,7 +714,7 @@ class _Composer:
                         hy0 = ly - 9.0
                         hy1 = ly + 2.5
                         col = C_AI_HL if is_ai else GROUP_FILLS.get(
-                            (seg.get("badge") or {}).get("icon", ""), _hex_to_rgb(seg["bg"])
+                            seg.get("group"), _hex_to_rgb(seg["bg"])
                         )
                         op = 0.40 if is_ai else 0.80
                         sh.draw_rect(fitz.Rect(hx0, hy0, hx1, hy1))
@@ -720,7 +724,7 @@ class _Composer:
                             b    = seg["badge"]
                             snum = b["number"]
                             markers.append((hy0, b["icon"], snum, source_index_map.get(snum, snum - 1)))
-            sh.commit()
+            _commit_highlights(pg, sh)
             for my, gkey, snum, sidx in markers:
                 self._draw_margin_marker(pg, my, gkey, snum, sidx)
 
@@ -732,58 +736,123 @@ class _Composer:
         doc: fitz.Document,
         role: str,
         src_path: Path,
+        clean_text: str,
+        page_offsets: list[dict[str, Any]],
         segments: list[dict[str, Any]],
         is_ai: bool,
         source_index_map: dict[int, int],
     ) -> None:
-        src_doc = fitz.open(src_path)
-        try:
-            hl_items: list[dict[str, Any]] = []
-            for idx, seg in enumerate(segments):
-                if "bg" in seg and seg["text"].strip():
-                    hl_items.append({"idx": idx, "text": seg["text"].strip(), "seg": seg, "matched": False})
+        ranges: list[tuple[int, int, dict[str, Any]]] = []
+        cursor = 0
+        for segment in segments:
+            end = cursor + len(segment["text"])
+            if "bg" in segment and end > cursor:
+                ranges.append((cursor, end, segment))
+            cursor = end
+        range_ends = [end for _, end, _ in ranges]
+        offsets_by_page = {offset["page"]: offset for offset in page_offsets}
+        seen_badges: set[int] = set()
 
-            seen_badges: set[int] = set()
-            for page_idx in range(len(src_doc)):
-                src_page = src_doc[page_idx]
-                pg = self._new_page(doc, role)
-                target = fitz.Rect(0, 0, PAGE_W, PAGE_H)
-                pg.show_pdf_page(target, src_doc, page_idx, keep_proportion=True)
+        with fitz.open(src_path) as source:
+            if len(source) == 1 and not page_offsets:
+                offsets_by_page = {1: {"start": 0, "end": len(clean_text), "ocr": False}}
+            for index, src_page in enumerate(source):
+                # PyMuPDF's extraction coordinates are unrotated. Flatten the
+                # original rotation in memory before placing or mapping the page.
+                if src_page.rotation:
+                    src_page.remove_rotation()
+                page = self._new_page(doc, role)
+                target = self._source_area(src_page)
+                if src_page.get_contents():
+                    page.show_pdf_page(target, source, index, keep_proportion=True)
 
-                sx = PAGE_W / src_page.rect.width  if src_page.rect.width  else 1.0
-                sy = PAGE_H / src_page.rect.height if src_page.rect.height else 1.0
+                offset = offsets_by_page.get(index + 1)
+                if not offset:
+                    if ranges:
+                        self._unmapped_highlights(page)
+                    continue
+                first = bisect_right(range_ends, offset["start"])
+                if first == len(ranges) or ranges[first][0] >= offset["end"]:
+                    continue
+                page_text = clean_text[offset["start"]:offset["end"]]
+                words = self._matching_source_words(src_page, page_text) if not offset.get("ocr") else []
+                if not words:
+                    self._unmapped_highlights(page)
+                    continue
 
-                markers: list[tuple[float, str, int, int]] = []
-                for item in hl_items:
-                    snippet = " ".join(item["text"].split())
-                    if len(snippet) < 4:
+                scale = min(target.width / src_page.rect.width, target.height / src_page.rect.height)
+                transform = fitz.Matrix(
+                    scale, 0, 0, scale,
+                    target.x0 + (target.width - src_page.rect.width * scale) / 2.0,
+                    target.y0 + (target.height - src_page.rect.height * scale) / 2.0,
+                )
+                word_starts = [start for start, _, _, _ in words]
+                word_ends = [end for _, end, _, _ in words]
+                shape = page.new_shape()
+                markers = []
+                for range_index in range(first, len(ranges)):
+                    start, end, segment = ranges[range_index]
+                    if start >= offset["end"]:
+                        break
+                    word_first = bisect_right(word_ends, start - offset["start"])
+                    word_last = bisect_left(word_starts, end - offset["start"])
+                    lines: dict[tuple[int, int], fitz.Rect] = {}
+                    for _, _, line, rect in words[word_first:word_last]:
+                        if line in lines:
+                            lines[line].include_rect(rect)
+                        else:
+                            lines[line] = fitz.Rect(rect)
+                    if not lines:
                         continue
-                    quads = src_page.search_for(snippet[:200], quads=True)
-                    if not quads and len(snippet) > 40:
-                        quads = src_page.search_for(snippet[:60], quads=True)
-                    if quads:
-                        seg = item["seg"]
-                        col = C_AI_HL if is_ai else _hex_to_rgb(seg["bg"])
-                        op  = 0.40 if is_ai else 0.80
-                        for q_idx, q in enumerate(quads):
-                            r  = q.rect
-                            r  = fitz.Rect(r.x0 * sx, r.y0 * sy, r.x1 * sx, r.y1 * sy)
-                            sh = pg.new_shape()
-                            sh.draw_rect(r)
-                            sh.finish(fill=col, color=None, fill_opacity=op)
-                            sh.commit()
-                            if (q_idx == 0 and not is_ai
-                                    and seg.get("badge") and item["idx"] not in seen_badges):
-                                seen_badges.add(item["idx"])
-                                b    = seg["badge"]
-                                snum = b["number"]
-                                markers.append(
-                                    (r.y0, b["icon"], snum, source_index_map.get(snum, snum - 1))
-                                )
-                for my, gkey, snum, sidx in markers:
-                    self._draw_margin_marker(pg, my, gkey, snum, sidx)
-        finally:
-            src_doc.close()
+                    color = C_AI_HL if is_ai else GROUP_FILLS.get(
+                        segment.get("group"), _hex_to_rgb(segment["bg"])
+                    )
+                    for rect in lines.values():
+                        shape.draw_rect(rect * transform)
+                        shape.finish(fill=color, color=None, fill_opacity=0.40 if is_ai else 0.80)
+                    badge = segment.get("badge")
+                    if not is_ai and badge and range_index not in seen_badges:
+                        seen_badges.add(range_index)
+                        y = (next(iter(lines.values())) * transform).y0
+                        number = badge["number"]
+                        markers.append((y, badge["icon"], number, source_index_map.get(number, number - 1)))
+                _commit_highlights(page, shape)
+                for marker in markers:
+                    self._draw_margin_marker(page, *marker)
+
+    @staticmethod
+    def _source_area(src_page: fitz.Page) -> fitz.Rect:
+        """Fit to Letter and reserve clear bands for the report chrome."""
+        full = fitz.Rect(0, 0, PAGE_W, PAGE_H)
+        scale = min(PAGE_W / src_page.rect.width, PAGE_H / src_page.rect.height)
+        top = (PAGE_H - src_page.rect.height * scale) / 2.0
+        for operation, box in src_page.get_bboxlog():
+            if operation == "ignore-text":
+                continue
+            visible = fitz.Rect(box) & src_page.rect
+            if not visible.is_empty and (top + visible.y0 * scale < 48.0 or top + visible.y1 * scale > 738.0):
+                return fitz.Rect(36.0, 52.0, 576.0, 738.0)
+        return full
+
+    @staticmethod
+    def _matching_source_words(
+        page: fitz.Page, clean_text: str
+    ) -> list[tuple[int, int, tuple[int, int], fitz.Rect]]:
+        """Require a positional word match before putting analysis paint on the source."""
+        analyzed = list(re.finditer(r"\S+", clean_text))
+        expected = [unicodedata.normalize("NFKC", word.group()) for word in analyzed]
+        for sort in (False, True):
+            physical = page.get_text("words", sort=sort)
+            if [unicodedata.normalize("NFKC", word[4]) for word in physical] == expected:
+                return [
+                    (word.start(), word.end(), (raw[5], raw[6]), fitz.Rect(raw[:4]))
+                    for word, raw in zip(analyzed, physical)
+                ]
+        return []
+
+    def _unmapped_highlights(self, page: fitz.Page) -> None:
+        self._t(page, 36.0, 746.0, "Highlight positions unavailable for this source page.",
+                "noto_reg", 6.0, C_MUTED)
 
     # -----------------------------------------------------------------------
     # Main build entry point
@@ -807,7 +876,7 @@ class _Composer:
             self._build_source_list(doc, ctx)
             if src_path is not None:
                 self._build_submission_from_pdf(
-                    doc, "Integrity Submission", src_path,
+                    doc, "Integrity Submission", src_path, raw_text, ctx.get("source_page_offsets", []),
                     ctx.get("sim_segments", []), False, source_index_map
                 )
             else:
@@ -823,7 +892,7 @@ class _Composer:
             if ai_info.get("available"):
                 if src_path is not None:
                     self._build_submission_from_pdf(
-                        doc, "AI Writing Submission", src_path,
+                        doc, "AI Writing Submission", src_path, raw_text, ctx.get("source_page_offsets", []),
                         ctx.get("ai_segments", []), True, source_index_map
                     )
                 else:
@@ -838,11 +907,12 @@ class _Composer:
             role = self._page_roles[i] if i < len(self._page_roles) else "Cover Page"
             self._paint_chrome(page, i + 1, total_pages, role, ctx["display_id"])
 
+        doc.set_metadata({"title": "Hamzonics Analysis Report", "author": "Hamzonics"})
         out = doc.tobytes(garbage=3, deflate=True)
         doc.close()
         return out
 
 
 def build_pdf_report(ctx: dict[str, Any]) -> bytes:
-    """Compose the pixel-exact Turnitin PDF report from the report context."""
+    """Compose a PDF from the analysis results and source document."""
     return _Composer().build(ctx)

@@ -298,28 +298,32 @@ def get_submission_ai(submission_id: str, db: DB) -> AIOut:
 def download_report(
     submission_id: str, db: DB, part: Annotated[Literal["all", "similarity", "ai"], Query()] = "all",
 ) -> FileResponse:
-    """The PDF report. part=all (default) is the full report, built during the check and rebuilt
-    here if missing or altered on disk; part=similarity / part=ai is that half only."""
+    """Download a current full, Similarity-only, or AI-only PDF report."""
     sub = _get(db, submission_id)
     _done(sub, "The report is")
-    from worker.report import generate_part_report, generate_report
+    from worker.report import generate_part_report, generate_report, pdf_artifact_is_current
 
     stem = re.sub(r"[^\w\-]+", "_", Path(sub.original_filename).stem)[:60] or "document"
     if part != "all":
         path = generate_part_report(db, sub, part)
         label = "similarity" if part == "similarity" else "ai"
         return FileResponse(
-            path, media_type="application/pdf", filename=f"{stem}-turnitin-{label}-report.pdf",
+            path, media_type="application/pdf", filename=f"{stem}-hamzonics-{label}-report.pdf",
             headers={"Cache-Control": "private, no-store"},
         )
 
     row = db.scalar(select(ReportRow).where(ReportRow.submission_id == sub.id))
     path = Path(row.pdf_path) if row else None
-    if row is None or path is None or not path.exists() or hashlib.sha256(path.read_bytes()).hexdigest() != row.sha256:
+    if (
+        row is None
+        or path is None
+        or not pdf_artifact_is_current(path)
+        or hashlib.sha256(path.read_bytes()).hexdigest() != row.sha256
+    ):
         row = generate_report(db, sub)
         path = Path(row.pdf_path)
     return FileResponse(
-        path, media_type="application/pdf", filename=f"{stem}-turnitin-report.pdf",
+        path, media_type="application/pdf", filename=f"{stem}-hamzonics-report.pdf",
         headers={"Cache-Control": "private, no-store"},
     )
 
@@ -329,7 +333,7 @@ def delete_check(db: DB, sub: Submission) -> None:
     folder = Path(sub.file_path).parent
     report = db.scalar(select(ReportRow).where(ReportRow.submission_id == sub.id))
     pdf = Path(report.pdf_path) if report else None
-    from worker.report import part_report_path
+    from worker.report import part_report_path, pdf_artifact_marker_path
 
     part_pdfs = [part_report_path(sub.id, part) for part in ("similarity", "ai")]
     repo = db.scalar(select(SourceRow).where(SourceRow.submission_id == sub.id))
@@ -338,10 +342,10 @@ def delete_check(db: DB, sub: Submission) -> None:
     db.delete(sub)
     db.commit()
     shutil.rmtree(folder, ignore_errors=True)
-    if pdf is not None:
-        pdf.unlink(missing_ok=True)
-    for p in part_pdfs:
-        p.unlink(missing_ok=True)
+    for artifact in (pdf, *part_pdfs):
+        if artifact is not None:
+            artifact.unlink(missing_ok=True)
+            pdf_artifact_marker_path(artifact).unlink(missing_ok=True)
 
 
 @router.delete("/submissions/{submission_id}", response_model=MessageOut)

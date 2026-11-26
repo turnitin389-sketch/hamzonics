@@ -15,19 +15,6 @@ from tests.api.test_similarity_api import _paste, _seed_corpus, mixed_text
 from tests.engine.test_ai import AI, FakeScorer
 
 
-def _chromium_available() -> bool:
-    try:
-        from playwright.sync_api import sync_playwright
-
-        with sync_playwright() as p:
-            p.chromium.launch().close()
-        return True
-    except Exception:
-        return False
-
-
-needs_chromium = pytest.mark.skipif(not _chromium_available(), reason="Playwright Chromium is not installed")
-
 SECTIONS = [
     "Document Details",
     "Overall Similarity",
@@ -74,7 +61,6 @@ def test_highlights_align_with_text_offsets(client: TestClient, fake_ai) -> None
         assert html.unescape(re.sub(r"<[^>]+>", "", body)) == clean
 
 
-@needs_chromium
 def test_pdf_pages_header_and_verification(client: TestClient, fake_ai) -> None:  # type: ignore[no-untyped-def]
     import pdfplumber
 
@@ -98,6 +84,7 @@ def test_pdf_pages_header_and_verification(client: TestClient, fake_ai) -> None:
         assert title in joined, f"missing section {title}"
     for i, t in enumerate(texts, start=1):
         assert t.count(f"Page {i} of {n}") >= 2, f"header/footer page number missing on page {i}"
+        assert t.count("Hamzonics") >= 2
         assert display_id(sid) in t, f"submission id missing on page {i}"
     assert cover_links == []
     assert "Internet" in joined and "en.wikipedia.org" in joined
@@ -129,6 +116,41 @@ def test_ai_off_says_why(client: TestClient) -> None:
     sid = _paste(client, ORIGINAL_ESSAY)["id"]
     ai = client.get(f"/api/submissions/{sid}/ai").json()
     assert ai["available"] is False and "switched off" in ai["message"]
+
+
+def test_download_variants_refresh_legacy_layout(client: TestClient) -> None:
+    import fitz
+
+    from tests.engine.test_similarity import ORIGINAL_ESSAY
+    from worker.report import part_report_path, pdf_artifact_is_current, pdf_artifact_marker_path
+
+    sid = _paste(client, ORIGINAL_ESSAY)["id"]
+    route = f"/api/submissions/{sid}/report.pdf"
+    for part in ("similarity", "ai"):
+        old = part_report_path(sid, part)
+        old.parent.mkdir(parents=True, exist_ok=True)
+        old.write_bytes(b"legacy report")
+        pdf = client.get(route, params={"part": part})
+        assert pdf.status_code == 200
+        assert "hamzonics" in pdf.headers["content-disposition"]
+        assert pdf_artifact_is_current(old)
+        assert old.read_bytes() == pdf.content
+        with fitz.open(stream=pdf.content, filetype="pdf") as doc:
+            assert len(doc) >= 2
+            assert all(p.rect == fitz.Rect(0, 0, 612, 792) for p in doc)
+            if part == "ai":
+                assert "AI Writing score unavailable" in doc[1].get_text()
+                assert "0% detected as AI" not in doc[1].get_text()
+            else:
+                assert "Overall Similarity" in doc[1].get_text()
+        assert client.get(route, params={"part": part}).content == pdf.content
+
+    full = client.get(route)
+    assert full.status_code == 200
+    path = part_report_path(sid, "ai").with_name(f"{sid}.pdf")
+    pdf_artifact_marker_path(path).unlink()
+    assert client.get(route).status_code == 200
+    assert pdf_artifact_is_current(path)
 
 
 def test_qr_encodes_verify_url() -> None:
