@@ -154,3 +154,14 @@ def test_real_model_separates_ai_from_human() -> None:
              "optimization problem easier. On the WMT14 English to French task our system obtains a BLEU score of 34.8.")
     assert scorer.score(ai) > 0.9
     assert scorer.score(human) < 0.5
+
+
+def test_ai_highlights_exclude_skipped_words() -> None:
+    skipped = "Short heading"
+    text = f"{AI}\n{skipped}\n{AI}"
+    result = detect_ai(text, FakeScorer(), AIOptions(min_words=1))
+    highlights = segments_to_chars(text, result.segments)
+
+    assert [text[span["start"]:span["end"]] for span in highlights] == [
+        AI.rstrip("."), AI.rstrip("."),
+    ]
