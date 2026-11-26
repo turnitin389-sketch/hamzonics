@@ -217,15 +217,14 @@ def detect_ai(
         if level == "ai":
             ai_words += s.words
         prev = segments[-1] if segments else None
-        if prev and prev["level"] == level and prev["_k"] == k - 1:
-            prev["word_end"], prev["_k"] = s.word_end, k
+        if prev and prev["level"] == level and prev["word_end"] == s.word_start:
+            prev["word_end"] = s.word_end
             prev["_scores"].append((p, s.words))
         else:
-            segments.append({"word_start": s.word_start, "word_end": s.word_end, "level": level, "_k": k,
+            segments.append({"word_start": s.word_start, "word_end": s.word_end, "level": level,
                              "_scores": [(p, s.words)]})
     for seg in segments:
         scores = seg.pop("_scores")
-        seg.pop("_k")
         seg["score"] = round(sum(p * w for p, w in scores) / max(sum(w for _, w in scores), 1), 4)
 
     return AIResult(
