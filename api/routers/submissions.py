@@ -323,7 +323,7 @@ def download_report(
         row = generate_report(db, sub)
         path = Path(row.pdf_path)
     return FileResponse(
-        path, media_type="application/pdf", filename=f"{stem}-hamzonics-report.pdf",
+        path, media_type="application/pdf", filename=f"{stem}-turnitin-report.pdf",
         headers={"Cache-Control": "private, no-store"},
     )
 
