@@ -13,7 +13,7 @@ export function Logo({ className = "h-8 w-auto" }: { className?: string }) {
         aria-hidden="true"
         className="h-full w-auto object-contain"
       />
-      <span>Report</span>
+      <span>Reports</span>
     </span>
   );
 }

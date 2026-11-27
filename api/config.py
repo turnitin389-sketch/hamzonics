@@ -4,17 +4,19 @@ from __future__ import annotations
 
 from functools import lru_cache
 from pathlib import Path
-from typing import Literal
+from typing import ClassVar, Literal
 
 from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+from engine.brand import BRAND_NAME
 
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
     env: Literal["dev", "prod", "test"] = "dev"
-    app_name: str = "Turnitin"
+    app_name: ClassVar[str] = BRAND_NAME
     public_base_url: str = "http://localhost:3000"
     # Server secret: used to hash uploader IP addresses for rate limiting (never stored in clear).
     secret_key: str = Field(min_length=32)

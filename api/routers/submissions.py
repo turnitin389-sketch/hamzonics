@@ -308,7 +308,7 @@ def download_report(
         path = generate_part_report(db, sub, part)
         label = "similarity" if part == "similarity" else "ai"
         return FileResponse(
-            path, media_type="application/pdf", filename=f"{stem}-turnitin-report-{label}.pdf",
+            path, media_type="application/pdf", filename=f"{stem}-turnitin-reports-{label}.pdf",
             headers={"Cache-Control": "private, no-store"},
         )
 
@@ -323,7 +323,7 @@ def download_report(
         row = generate_report(db, sub)
         path = Path(row.pdf_path)
     return FileResponse(
-        path, media_type="application/pdf", filename=f"{stem}-turnitin-report.pdf",
+        path, media_type="application/pdf", filename=f"{stem}-turnitin-reports.pdf",
         headers={"Cache-Control": "private, no-store"},
     )
 

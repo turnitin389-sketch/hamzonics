@@ -66,7 +66,7 @@ FLAG_TEXT = {
 }
 MAX_FLAG_EXAMPLES = 8
 _REPORT_PACKAGE = Path(__file__).resolve().parent.parent / "engine" / "report"
-_REPORT_LAYOUT_REVISION = "turnitin-report-v3"
+_REPORT_LAYOUT_REVISION = "turnitin-reports-v4"
 LOGO_FILE = Path(__file__).resolve().parent.parent / "frontend" / "public" / "logo.png"
 
 
@@ -79,7 +79,7 @@ def get_logo_uri() -> str:
         fallback = (
             b"<svg xmlns='http://www.w3.org/2000/svg' width='210' height='32' viewBox='0 0 210 32'>"
             b"<text x='0' y='22' font-family='Arial,Helvetica,sans-serif' font-size='18' "
-            b"font-weight='bold' fill='#17394b'>Turnitin Report</text></svg>"
+            b"font-weight='bold' fill='#17394b'>Turnitin Reports</text></svg>"
         )
         return "data:image/svg+xml;base64," + base64.b64encode(fallback).decode("ascii")
     return "data:image/png;base64," + base64.b64encode(logo).decode("ascii")
@@ -266,7 +266,7 @@ def build_context(db: Session, sub: Submission, part: str = "all") -> dict[str, 
     url = verify_url(sub.id)
     return {
         "part": part if part in REPORT_PARTS else "all",
-        "app_name": "Turnitin Report",
+        "app_name": settings.app_name,
         "submission_id": sub.id,
         "display_id": display_id(sub.id),
         "author": "",

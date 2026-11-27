@@ -84,7 +84,7 @@ def test_pdf_pages_header_and_verification(client: TestClient, fake_ai) -> None:
         assert title in joined, f"missing section {title}"
     for i, t in enumerate(texts, start=1):
         assert t.count(f"Page {i} of {n}") >= 2, f"header/footer page number missing on page {i}"
-        assert t.count("Report") >= 2
+        assert t.count("Reports") >= 2
         assert display_id(sid) in t, f"submission id missing on page {i}"
     assert cover_links == []
     assert "Internet" in joined and "en.wikipedia.org" in joined
@@ -132,11 +132,12 @@ def test_download_variants_refresh_legacy_layout(client: TestClient) -> None:
         old.write_bytes(b"legacy report")
         pdf = client.get(route, params={"part": part})
         assert pdf.status_code == 200
-        assert "turnitin-report" in pdf.headers["content-disposition"]
+        assert f"turnitin-reports-{part}.pdf" in pdf.headers["content-disposition"]
         assert pdf_artifact_is_current(old)
         assert old.read_bytes() == pdf.content
         with fitz.open(stream=pdf.content, filetype="pdf") as doc:
             assert len(doc) >= 2
+            assert doc.metadata["author"] == "Turnitin Reports"
             assert all(p.rect == fitz.Rect(0, 0, 612, 792) for p in doc)
             if part == "ai":
                 assert "AI Writing score unavailable" in doc[1].get_text()
