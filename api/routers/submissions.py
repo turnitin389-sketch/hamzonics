@@ -308,7 +308,7 @@ def download_report(
         path = generate_part_report(db, sub, part)
         label = "similarity" if part == "similarity" else "ai"
         return FileResponse(
-            path, media_type="application/pdf", filename=f"{stem}-hamzonics-{label}-report.pdf",
+            path, media_type="application/pdf", filename=f"{stem}-turnitin-report-{label}.pdf",
             headers={"Cache-Control": "private, no-store"},
         )
 
