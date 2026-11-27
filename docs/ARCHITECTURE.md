@@ -20,7 +20,7 @@ browser ──> nginx ──/api/*──> api (FastAPI) ──> postgres (pgvect
 - Queue: at most `MAX_CONCURRENT_CHECKS` (3) checks run at once (Celery concurrency, or 3 inline
   threads locally); the rest wait in arrival order and see `queue_position`. `GET /api/queue`.
 - The upload is deleted when its check is done; whole checks are deleted after `RETENTION_DAYS`.
-  Repository copies show to others only as "Submitted to Hamzonics on <date>", never a file name,
+  Repository copies show to others only as "Submitted to Turnitin Report on <date>", never a file name,
   and are removed when the uploader deletes the check.
 - Same text = same result: frozen results (similarity AND AI) keyed by text hash + engine version.
 
