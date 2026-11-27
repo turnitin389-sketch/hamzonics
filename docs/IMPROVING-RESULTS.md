@@ -1,7 +1,7 @@
 # Getting closer to Turnitin
 
 Measured 2026-11-22 on one 5,000-word pharmacy paper that Turnitin scored at 7% similarity:
-Turnitin Reports found 2% on a Windows PC **without** web search (open-access papers + Wikipedia only).
+Hamzonics found 2% on a Windows PC **without** web search (open-access papers + Wikipedia only).
 Most of Turnitin's sources for that paper were web pages and PDFs (researchsquare, frontiersin,
 university repositories), which only a web search engine finds.
 

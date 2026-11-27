@@ -1,6 +1,6 @@
 # Third-party components
 
-Every library, repo and model used by Turnitin Reports, with its licence. Rule: anything
+Every library, repo and model used by Hamzonics, with its licence. Rule: anything
 that forbids commercial use (or is "academic use only") stays behind an
 `ENABLE_<NAME>=false` flag and is not shipped in production.
 

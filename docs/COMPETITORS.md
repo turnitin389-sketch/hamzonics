@@ -1,6 +1,6 @@
 # Competitor research (November 2026)
 
-What the main checkers offer, where Turnitin Reports stands, and what is still missing.
+What the main checkers offer, where Hamzonics stands, and what is still missing.
 Figures come from the linked pages; most accuracy numbers are vendor claims or
 blog tests with different methods, so treat them as rough.
 
@@ -15,7 +15,7 @@ blog tests with different methods, so treat them as rough.
 | **Scribbr** | Students | Uses Turnitin's database | Separate tool | Paid per document |
 | **Check Plagiarism / CheckForPlag / DrillBit** | South Asia | Claim Urdu and other regional languages | Varies | Weekly or yearly plans |
 
-## Where Turnitin Reports is already different (built and tested)
+## Where Hamzonics is already different (built and tested)
 
 1. **Urdu first.** Urdu word counting with diacritics, Urdu sentence ends (۔ ؟),
    Urdu Wikipedia as a live source, Urdu reference headings (حوالہ جات, کتابیات),

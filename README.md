@@ -1,4 +1,4 @@
-# Turnitin Reports
+# Turnitin Report
 
 Free public document checker: **similarity (plagiarism) with highlighted, numbered sources**,
 **AI-writing detection**, hidden-text checks, and a full **PDF report**. No accounts: anyone opens

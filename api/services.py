@@ -3,8 +3,6 @@ same numbers."""
 
 from __future__ import annotations
 
-import re
-
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -16,16 +14,6 @@ from engine.similarity.merge import Filters, RawMatch, score
 from engine.similarity.tokens import tokenize
 
 SOURCE_TYPES = ("web", "corpus", "submission")  # Internet, Publications, Submitted works
-
-
-def _source_title(row: SimilarityMatchRow) -> str:
-    if row.source_type == "submission":
-        return re.sub(
-            r"^Submitted to .+ on (\d{4}-\d{2}-\d{2})$",
-            rf"Submitted to {get_settings().app_name} on \1",
-            row.source_title,
-        )
-    return row.source_title
 
 
 def default_filters() -> Filters:
@@ -85,7 +73,7 @@ def similarity_view(db: Session, sub: Submission, filters: Filters | None = None
         total_words=result.total_words,
         sources=[
             SimilaritySourceOut(source_key=s.source_key, type=meta[s.source_key].source_type,
-                                title=_source_title(meta[s.source_key]), url=meta[s.source_key].source_url,
+                                title=meta[s.source_key].source_title, url=meta[s.source_key].source_url,
                                 words=s.words, percent=s.percent)
             for s in result.sources
         ],

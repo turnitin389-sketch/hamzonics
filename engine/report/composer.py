@@ -1,4 +1,4 @@
-"""Compose Turnitin Reports Similarity and AI Writing PDFs on US Letter pages."""
+"""Compose Turnitin Report Similarity and AI Writing PDFs on US Letter pages."""
 
 from __future__ import annotations
 
@@ -244,8 +244,8 @@ class _Composer:
                 stream=logo_bytes,
                 keep_proportion=True,
             )
-            self._t(page, 82.0, y, "Reports", "lexend_sb", 8.0, C_BRAND)
-            self._t(page, 116.0, y, left_str,       "noto_reg", 6.0, C_TEXT)
+            self._t(page, 82.0, y, "Report", "lexend_sb", 8.0, C_BRAND)
+            self._t(page, 107.0, y, left_str,       "noto_reg", 6.0, C_TEXT)
             self._t(page, lbl_x,  y, "Submission ID", "noto_reg", 6.0, C_TEXT)
             self._t(page, id_x,   y, display_id,      "noto_reg", 6.0, C_TEXT)
         page.draw_line(fitz.Point(36, 44), fitz.Point(576, 44), color=C_BRAND, width=0.8)
@@ -915,7 +915,7 @@ class _Composer:
             role = self._page_roles[i] if i < len(self._page_roles) else "Cover Page"
             self._paint_chrome(page, i + 1, total_pages, role, ctx["display_id"])
 
-        doc.set_metadata({"title": f"{ctx['app_name']} Analysis", "author": ctx["app_name"]})
+        doc.set_metadata({"title": "Turnitin Report Analysis Report", "author": "Turnitin Report"})
         out = doc.tobytes(garbage=3, deflate=True)
         doc.close()
         return out
