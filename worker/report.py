@@ -66,19 +66,23 @@ FLAG_TEXT = {
 }
 MAX_FLAG_EXAMPLES = 8
 _REPORT_PACKAGE = Path(__file__).resolve().parent.parent / "engine" / "report"
-_REPORT_LAYOUT_REVISION = "hamzonics-v2"
-_WORDMARK = (
-    b"<svg xmlns='http://www.w3.org/2000/svg' width='150' height='32' viewBox='0 0 150 32'>"
-    b"<rect x='1' y='4' width='24' height='24' rx='6' fill='#1e556e'/>"
-    b"<path d='M8 10v12m10-12v12M8 16h10' fill='none' stroke='white' stroke-width='2'/>"
-    b"<text x='34' y='22' font-family='Arial,Helvetica,sans-serif' font-size='18' "
-    b"font-weight='bold' fill='#17394b'>Hamzonics</text></svg>"
-)
-LOGO_URI = "data:image/svg+xml;base64," + base64.b64encode(_WORDMARK).decode("ascii")
+_REPORT_LAYOUT_REVISION = "turnitin-report-v3"
+LOGO_FILE = Path(__file__).resolve().parent.parent / "frontend" / "public" / "logo.png"
 
 
 def get_logo_uri() -> str:
-    return LOGO_URI
+    """Return the same logo asset used by the website for HTML-based PDF rendering."""
+    try:
+        logo = LOGO_FILE.read_bytes()
+    except OSError:
+        # Keep local/test environments usable if the optional frontend asset is absent.
+        fallback = (
+            b"<svg xmlns='http://www.w3.org/2000/svg' width='210' height='32' viewBox='0 0 210 32'>"
+            b"<text x='0' y='22' font-family='Arial,Helvetica,sans-serif' font-size='18' "
+            b"font-weight='bold' fill='#17394b'>Turnitin Report</text></svg>"
+        )
+        return "data:image/svg+xml;base64," + base64.b64encode(fallback).decode("ascii")
+    return "data:image/png;base64," + base64.b64encode(logo).decode("ascii")
 
 
 def _fmt(dt: datetime | None, tz: ZoneInfo) -> str:
@@ -262,7 +266,7 @@ def build_context(db: Session, sub: Submission, part: str = "all") -> dict[str, 
     url = verify_url(sub.id)
     return {
         "part": part if part in REPORT_PARTS else "all",
-        "app_name": "Hamzonics",
+        "app_name": "Turnitin Report",
         "submission_id": sub.id,
         "display_id": display_id(sub.id),
         "author": "",
