@@ -1,4 +1,4 @@
-"""Compose Hamzonics Similarity and AI Writing reports on US Letter pages."""
+"""Compose Turnitin Report Similarity and AI Writing PDFs on US Letter pages."""
 
 from __future__ import annotations
 
@@ -235,8 +235,16 @@ class _Composer:
         id_x  = 576.0 - id_w
         lbl_x = id_x - 5.0 - lbl_w
 
+        logo_path = Path(__file__).resolve().parents[2] / "frontend" / "public" / "logo.png"
+        logo_bytes = logo_path.read_bytes()
         for y in (34.0, 758.0):
-            self._t(page, 36.0, y, "Hamzonics", "lexend_sb", 8.0, C_BRAND)
+            # Use the website's Turnitin wordmark in both the page header and footer.
+            page.insert_image(
+                fitz.Rect(36.0, y - 11.0, 78.0, y + 2.0),
+                stream=logo_bytes,
+                keep_proportion=True,
+            )
+            self._t(page, 82.0, y, "Report", "lexend_sb", 8.0, C_BRAND)
             self._t(page, 107.0, y, left_str,       "noto_reg", 6.0, C_TEXT)
             self._t(page, lbl_x,  y, "Submission ID", "noto_reg", 6.0, C_TEXT)
             self._t(page, id_x,   y, display_id,      "noto_reg", 6.0, C_TEXT)
@@ -907,7 +915,7 @@ class _Composer:
             role = self._page_roles[i] if i < len(self._page_roles) else "Cover Page"
             self._paint_chrome(page, i + 1, total_pages, role, ctx["display_id"])
 
-        doc.set_metadata({"title": "Hamzonics Analysis Report", "author": "Hamzonics"})
+        doc.set_metadata({"title": "Turnitin Report Analysis Report", "author": "Turnitin Report"})
         out = doc.tobytes(garbage=3, deflate=True)
         doc.close()
         return out
