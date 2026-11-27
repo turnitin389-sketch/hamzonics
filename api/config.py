@@ -119,7 +119,9 @@ class Settings(BaseSettings):
     ai2_enabled: bool = False
     ai2_model: str = "desklib/ai-text-detector-v1.01"
     ai2_model_revision: str = "5fdea974cd4287c61674951ec78803aa274e2fb7"
-    ai2_rule: str = "max"  # how the two scores are combined: max | mean | min
+    # How the two scores are combined: max | mean | min, or "only": the second detector alone
+    # (the first model's weights are not loaded; its tokenizer still sets the windows).
+    ai2_rule: str = "max"
     # int8 (dynamic quantization) for the second detector: ~1 GB less RAM, for small servers.
     ai2_quantize: bool = False
     # Confirming detector (needs PyTorch): a window is AI only if BOTH models say so.

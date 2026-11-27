@@ -51,6 +51,36 @@ def download(repo: str, revision: str, cache_dir: Path) -> Path:
     return path.parent
 
 
+class TokenCounter:
+    """Only the tokenizer of the primary model (a few MB): splits the text into the same
+    windows as the full model, without loading its weights (~500 MB)."""
+
+    def __init__(self, model_dir: Path, name: str) -> None:
+        from tokenizers import Tokenizer
+
+        self.name = name
+        self.tokenizer = Tokenizer.from_file(str(model_dir / "tokenizer.json"))
+        self.tokenizer.no_truncation()
+        self.tokenizer.no_padding()
+
+    def count_tokens(self, text: str) -> int:
+        return len(self.tokenizer.encode(text, add_special_tokens=False).ids)
+
+
+_counters: dict[tuple[str, str], TokenCounter] = {}
+
+
+def get_token_counter(repo: str, revision: str, cache_dir: Path) -> TokenCounter:
+    from huggingface_hub import hf_hub_download
+
+    key = (repo, revision)
+    with _lock:
+        if key not in _counters:
+            path = Path(hf_hub_download(repo, "tokenizer.json", revision=revision, cache_dir=str(cache_dir)))
+            _counters[key] = TokenCounter(path.parent, f"{repo}@{revision[:7]} tokenizer")
+        return _counters[key]
+
+
 def get_scorer(repo: str, revision: str, cache_dir: Path) -> RobertaScorer:
     key = (repo, revision)
     with _lock:

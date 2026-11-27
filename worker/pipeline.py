@@ -274,14 +274,30 @@ def _compute_ai(db, sub: Submission, clean_text: str, settings: Settings) -> dic
     from engine.ai import AIOptions, detect_ai
     from engine.ai.model import get_scorer
 
-    try:
-        scorer = get_scorer(settings.ai_model, settings.ai_model_revision, Path(settings.model_dir))
-    except Exception:
-        log.exception("AI model could not be loaded")
-        return {"available": False, "segments": [],
-                "message": "AI-writing detection is temporarily unavailable (the model could not be loaded)."}
+    scorer = None
+    second_only = settings.ai2_enabled and settings.ai2_rule == "only"
+    if second_only:
+        # Second detector alone: the first model's weights are never loaded (saves RAM).
+        try:
+            from engine.ai.combined import SecondOnlyScorer
+            from engine.ai.desklib import get_desklib
+            from engine.ai.model import get_token_counter
 
-    if settings.ai2_enabled:
+            scorer = SecondOnlyScorer(
+                get_token_counter(settings.ai_model, settings.ai_model_revision, Path(settings.model_dir)),
+                get_desklib(settings.ai2_model, settings.ai2_model_revision, Path(settings.model_dir),
+                            settings.torch_threads, settings.ai2_quantize))
+        except Exception:
+            log.exception("second AI model could not be loaded; using the first instead")
+    if scorer is None:
+        try:
+            scorer = get_scorer(settings.ai_model, settings.ai_model_revision, Path(settings.model_dir))
+        except Exception:
+            log.exception("AI model could not be loaded")
+            return {"available": False, "segments": [],
+                    "message": "AI-writing detection is temporarily unavailable (the model could not be loaded)."}
+
+    if settings.ai2_enabled and not second_only:
         # Second detector (needs PyTorch). If it cannot load, the check continues with the first.
         try:
             from engine.ai.combined import CombinedScorer

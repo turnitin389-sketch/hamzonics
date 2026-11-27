@@ -58,9 +58,12 @@ def _preload_ai_models(**_: object) -> None:
     if not settings.enable_ai:
         return
     try:
-        from engine.ai.model import get_scorer
+        from engine.ai.model import get_scorer, get_token_counter
 
-        get_scorer(settings.ai_model, settings.ai_model_revision, Path(settings.model_dir))
+        if settings.ai2_enabled and settings.ai2_rule == "only":
+            get_token_counter(settings.ai_model, settings.ai_model_revision, Path(settings.model_dir))
+        else:
+            get_scorer(settings.ai_model, settings.ai_model_revision, Path(settings.model_dir))
         if settings.ai_confirm_enabled:
             from engine.ai.superannotate import get_superannotate
 

@@ -28,6 +28,21 @@ class CombinedScorer:
         return max(a, b)
 
 
+class SecondOnlyScorer:
+    """Rule "only": the second detector scores every window alone; the primary model's
+    tokenizer still decides the windows, so its weights never need to be loaded."""
+
+    def __init__(self, counter, secondary) -> None:  # type: ignore[no-untyped-def]
+        self.counter, self.secondary = counter, secondary
+        self.name = f"{secondary.name} (windows: {counter.name})"
+
+    def count_tokens(self, text: str) -> int:
+        return self.counter.count_tokens(text)
+
+    def score(self, text: str) -> float:
+        return self.secondary.score(text)
+
+
 class GateScorer:
     """A window counts as AI only when a second model CONFIRMS the primary model's verdict.
 
